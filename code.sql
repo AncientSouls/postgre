@@ -20,7 +20,7 @@ create table spreads (
     "spreaded" boolean DEFAULT false
 );
 
-create table graph (
+create table graphs (
     id serial
 );
 
@@ -33,20 +33,20 @@ create table spreadable (
 create table graphFields (
     graphRef text,
     tableRef text,
-    idField integer,
+    idField text,
     fromField text, /*ref|id*/
     toField text, /*ref|id*/
     fromTable text, /*db|db/table*/
-    toTable text, /*db|db/table*/
+    toTable text /*db|db/table*/
 );
 
 insert into paths (source, target) values ('menzorg/documents/4','menzorg/documents/3'), ('menzorg/documents/3', 'menzorg/documents/2');
-insert into graphs (id) values 1,2;
+insert into graphs (id) values (1), (2);
 insert into spreadable (pathsGraphRef, spreadsGraphRef) values 
 ('menzorg/graphs/1', 'menzorg/graphs/2');
-insert into graphFields (graphRef, tableRef, idField, fromField, toField, fromTable, toTable) values 
-('menzorg/graphs/1', 'menorg/paths' 'id', 'source', 'target'),
-('menzorg/graphs/2', 'menorg/spreads' 'id', '', 'target');
+insert into graphFields (graphRef, tableRef, idField, fromField, toField) values 
+('menzorg/graphs/1', 'menorg/paths', 'id', 'source', 'target'),
+('menzorg/graphs/2', 'menorg/spreads', 'id', '', 'target');
 
 /* Распределиться на один шаг от данного спреда, по всем возможным спредеблам
 CREATE FUNCTION spreadBySpread(spreadRef text) RETURNS void */

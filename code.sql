@@ -1,8 +1,9 @@
 DROP table paths;
-DROP table paths2;
-DROP function spreadbyspread(text);
+DROP function _spreadBySpread(text,text,text,text);
 DROP table spreadable;
 DROP table spreads;
+DROP table graphs;
+DROP table graphFields;
 
 create table paths (
     id SERIAL,
@@ -52,7 +53,7 @@ insert into graphFields (graphRef, tableRef, idField, fromField, toField) values
 CREATE FUNCTION spreadBySpread(spreadRef text) RETURNS void */
 
 /* Распределиться на один шаг от данного спреда, согласно указанному спредеблу */
-CREATE FUNCTION _spreadBySpread(spreadRef text, spreadableRef text) RETURNS void
+CREATE FUNCTION _spreadBySpread(spreadRef text, spreadableRef text, pathsTableRef text, spreadsTableRef text) RETURNS void
     AS $$ 
     	DECLARE 
         	spread record;
@@ -67,7 +68,8 @@ CREATE FUNCTION _spreadBySpread(spreadRef text, spreadableRef text) RETURNS void
                 
                 if spread is null then EXIT; end if; 
 
-                select * from spreadable where id = split_part(spreadableRef,'/', 3) in spreadable;
+                select * from spreadable where id = split_part(spreadableRef,'/', 3);
+
                     EXECUTE E'
                         insert into spreads (target, root, path, prev)
                             select \''||spreadables.pathToPrefix||E'\'||cast('||spreadables.pathToKey||E' as text) as target,

@@ -1,89 +1,109 @@
-DROP table paths;
-DROP function _spreadBySpread(text,text,text,text);
-DROP table spreadable;
-DROP table spreads;
-DROP table graphs;
-DROP table graphFields;
+drop table firstPart;
+drop table secondPart;
+drop table someShitDocumets;
+drop table ancientGraphs;
+drop view graph1;
+drop table ancientGraphParts;
+drop table ancientGraphTables;
 
-create table paths (
-    id SERIAL,
-    source text, /*db/table/id*/
-    target text, /*db/table/id*/
-    type text
-);
-
-create table spreads (
+create table ancientGraphs (
     id serial,
-    target text, /*db/table/id*/
-    prev text, /*ref*/
-    path text, /*ref*/
-    root integer, /*id*/
-    "spreaded" boolean DEFAULT false
+    defaultGraphTable text
 );
 
-create table graphs (
+create table ancientGraphParts (
+    id serial,
+    graphTable integer,
+    graph integer
+);
+
+create table ancientGraphTables (
+    id serial,
+    tableName text,
+    idField text,
+    sourceField text, 
+    sourceFieldTable text,
+    targetField text,
+    targetFieldTable text
+);
+
+create table firstPart (
+    "number" serial,
+	"from" text,
+    "to" integer
+);
+create table secondPart (
+    id serial,
+	"source" text,
+    "target" text
+);
+
+create table someShitDocumets (
     id serial
 );
 
-create table spreadable (
-    id serial,
-    pathsGraphRef text, /*spreads: db/table*/
-    spreadsGraphRef text /*paths: db/table*/
-);
+CREATE OR REPLACE FUNCTION ancientViewConstrucor(gId integer) RETURNS setof record as $$
+	DECLARE
+    	oneTable record;
+        onePath record;
+        gStructure record;
+    BEGIN
+    
+    	create TEMP table ancientPaths ("source" text, "target" text, "table" text);
+    
+        for oneTable in 
+        	select * from ancientGraphParts as gParts, ancientGraphTables as gTable where 
+				gParts.graph = gId and
+        		gTable.id = gParts.graphTable
+        LOOP
+        	execute(E'
+                    insert into AncientPaths 
+                    	select cast ("'||oneTable.sourceField||'" as text), cast ("'
+                    	||oneTable.targetField||E'" as text), cast (\''
+                    	||oneTable.tableName||E'\' as text) as "table" from '||oneTable.tableName
+            		);
+        end loop;
+        for onePath in 
+        		select * from ancientPaths
+            LOOP   
+            	return next onePath;
+            end loop;
+		drop table ancientPaths;
+        return;
+    END;
+$$ LANGUAGE plpgsql;
 
-create table graphFields (
-    graphRef text,
-    tableRef text,
-    idField text,
-    fromField text, /*ref|id*/
-    toField text, /*ref|id*/
-    fromTable text, /*db|db/table*/
-    toTable text /*db|db/table*/
-);
+CREATE OR REPLACE FUNCTION createGraphView() RETURNS TRIGGER AS $$
+    BEGIN
+        CREATE or REPLACE VIEW graph1 AS 
+        	SELECT * FROM ancientViewConstrucor (1) as 
+            	f("source" text, "target" text, "table" text);
+		RETURN NEW;
+    END;
+$$ LANGUAGE plpgsql;
 
-insert into paths (source, target) values ('menzorg/documents/4','menzorg/documents/3'), ('menzorg/documents/3', 'menzorg/documents/2');
-insert into graphs (id) values (1), (2);
-insert into spreadable (pathsGraphRef, spreadsGraphRef) values 
-('menzorg/graphs/1', 'menzorg/graphs/2');
-insert into graphFields (graphRef, tableRef, idField, fromField, toField) values 
-('menzorg/graphs/1', 'menorg/paths', 'id', 'source', 'target'),
-('menzorg/graphs/2', 'menorg/spreads', 'id', '', 'target');
+CREATE TRIGGER graph_audit
+AFTER INSERT ON ancientGraphs
+    FOR EACH ROW EXECUTE PROCEDURE createGraphView();
 
-/* Распределиться на один шаг от данного спреда, по всем возможным спредеблам
-CREATE FUNCTION spreadBySpread(spreadRef text) RETURNS void */
 
-/* Распределиться на один шаг от данного спреда, согласно указанному спредеблу */
-CREATE FUNCTION _spreadBySpread(spreadRef text, spreadableRef text, pathsTableRef text, spreadsTableRef text) RETURNS void
-    AS $$ 
-    	DECLARE 
-        	spread record;
-            spreadable record;
-    	BEGIN
-        	WHILE true LOOP
-            
-                SELECT * into spread from spreads where 
-                	spreaded is not true and (
-                    id = cast (split_part(spreadRef,'/', 3) as integer)
-                )  LIMIT 1;
-                
-                if spread is null then EXIT; end if; 
+insert into ancientGraphs (id) values (1);
 
-                select * from spreadable where id = split_part(spreadableRef,'/', 3);
+insert into someShitDocumets (id) values (1),(2),(3);
 
-                    EXECUTE E'
-                        insert into spreads (target, root, path, prev)
-                            select \''||spreadables.pathToPrefix||E'\'||cast('||spreadables.pathToKey||E' as text) as target,
-                            '||cast(split_part(spreadRef, '/', 3) as integer)||E' as root, 
-                            \''||spreadables.target||E'/\'||cast(id as text) as path,
-                            \''||spreadables.source||'/'||spread.id||E'\' as prev
-                            from '|| split_part(spreadables.target, '/', 2)||' 
-                            where '||spreadables.pathFromKey||E' = \''||spread.target||E'\' 
-                            and cast('||spreadables.pathToKey||' as text) not in (
-                                select target from '|| split_part(spreadables.source, '/', 2)||'
-                            );';
-        		Update spreads SET spreaded = true WHERE id = spread.id;
-    		END LOOP; 
-    	end;
-    $$ LANGUAGE plpgsql;
+insert into firstPart ("from", "to") values ('someShitDocumets/1',3);
+insert into secondPart ("source", "target") values ('someShitDocumets/2','someShitDocumets/3');
+insert into secondPart ("source", "target") values ('someShitDocumets/2','someShitDocumets/1');
+insert into secondPart ("source", "target") values ('someShitDocumets/3','someShitDocumets/3');
 
-select * from spreads;
+insert into ancientGraphTables (tableName, idField, sourceField, targetField, targetFieldTable) values 
+('firstPart', 'number', 'from', 'to', 'someShitDocumets'),
+('secondPart', 'id', 'source', 'target', '');
+
+insert into ancientGraphParts (graph, graphTable) values 
+(1,1), (1,2);
+
+
+insert into firstPart ("from", "to") values ('someShitDocumets/1',1);
+
+select * from graph1;

@@ -21,9 +21,9 @@ create table ancientGraphTables (
     tableName text,
     idField text,
     sourceField text, 
-    sourceFieldTable text,
+    sourceFieldTable text DEFAULT '',
     targetField text,
-    targetFieldTable text
+    targetFieldTable text DEFAULT ''
 );
 
 create table firstPart (
@@ -48,7 +48,7 @@ CREATE OR REPLACE FUNCTION ancientViewConstrucor(gId integer) RETURNS setof reco
         gStructure record;
     BEGIN
     
-    	create TEMP table ancientPaths ("source" text, "target" text, "table" text);
+    	create TEMP table ancientPaths ("source" text, "target" text, "graphPartTable" text);
     
         for oneTable in 
         	select * from ancientGraphParts as gParts, ancientGraphTables as gTable where 
@@ -56,11 +56,10 @@ CREATE OR REPLACE FUNCTION ancientViewConstrucor(gId integer) RETURNS setof reco
         		gTable.id = gParts.graphTable
         LOOP
         	execute(E'
-                    insert into ancientPaths 
-                    	select cast ("'||oneTable.sourceField||'" as text), cast ("'
-                    	||oneTable.targetField||E'" as text), cast (\''
-                    	||oneTable.tableName||E'\' as text) as "table" from '||oneTable.tableName
-            		);
+                    insert into ancientPaths select \''
+                    	||oneTable.sourceFieldTable||E'\'||cast ("'||oneTable.sourceField||E'" as text), \''
+                    	||oneTable.targetFieldTable||E'\'||'||' cast ("'||oneTable.targetField||E'" as text), cast (\''
+                    	||oneTable.tableName||E'\' as text) as "graphPartTable" from '||oneTable.tableName);
         end loop;
         for onePath in 
         		select * from ancientPaths
@@ -98,7 +97,7 @@ insert into secondPart ("source", "target") values ('someShitDocumets/2','someSh
 insert into secondPart ("source", "target") values ('someShitDocumets/3','someShitDocumets/3');
 
 insert into ancientGraphTables (tableName, idField, sourceField, targetField, targetFieldTable) values 
-('firstPart', 'number', 'from', 'to', 'someShitDocumets'),
+('firstPart', 'number', 'from', 'to', 'someShitDocumets/'),
 ('secondPart', 'id', 'source', 'target', '');
 
 insert into ancientGraphParts (graph, graphTable) values 

@@ -2,7 +2,6 @@ drop table firstPart;
 drop table secondPart;
 drop table someShitDocumets;
 drop table ancientGraphs;
-drop view graph1;
 drop table ancientGraphParts;
 drop table ancientGraphTables;
 
@@ -57,7 +56,7 @@ CREATE OR REPLACE FUNCTION ancientViewConstrucor(gId integer) RETURNS setof reco
         		gTable.id = gParts.graphTable
         LOOP
         	execute(E'
-                    insert into AncientPaths 
+                    insert into ancientPaths 
                     	select cast ("'||oneTable.sourceField||'" as text), cast ("'
                     	||oneTable.targetField||E'" as text), cast (\''
                     	||oneTable.tableName||E'\' as text) as "table" from '||oneTable.tableName
@@ -75,9 +74,11 @@ $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION createGraphView() RETURNS TRIGGER AS $$
     BEGIN
-        CREATE or REPLACE VIEW graph1 AS 
-        	SELECT * FROM ancientViewConstrucor (1) as 
+      EXECUTE (E'
+        CREATE or REPLACE VIEW "ancientViewGraph||cast('||cast(NEW.id as text)||' )" AS 
+        	SELECT * FROM ancientViewConstrucor ('||cast(NEW.id as text)||') as 
             	f("source" text, "target" text, "table" text);
+                 ');
 		RETURN NEW;
     END;
 $$ LANGUAGE plpgsql;
@@ -106,4 +107,4 @@ insert into ancientGraphParts (graph, graphTable) values
 
 insert into firstPart ("from", "to") values ('someShitDocumets/1',1);
 
-select * from graph1;
+select * from ancientViewGraph1;

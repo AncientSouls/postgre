@@ -20,22 +20,22 @@ var
 ;
 
 create_tables = `
-  create table ancientGraphs (
+  create table _ancientGraphs (
     id serial,
     defaultGraphTable text
   );
-  create table ancientLinksId (
+  create table _ancientLinksId (
     id serial,
     graphTableId integer,
     realId integer
   );
-  create table ancientGraphParts (
+  create table _ancientGraphParts (
     id serial,
     graphTable integer,
     localId integer,
     graph integer
   );
-  create table ancientGraphTables (
+  create table _ancientGraphTables (
     id serial,
     tableName text,
     idField text,
@@ -64,43 +64,43 @@ insert_data = `
   insert into firstPart ("from", "to") values ('someShitDocumets/1',3);
   insert into secondPart ("source", "target") values ('someShitDocumets/2','someShitDocumets/3');
   insert into secondPart ("source", "target") values ('someShitDocumets/3','someShitDocumets/3');
-  insert into ancientGraphTables (tableName, idField, sourceField, targetField, targetFieldTable) values 
+  insert into _ancientGraphTables (tableName, idField, sourceField, targetField, targetFieldTable) values 
     ('firstPart', 'number', 'from', 'to', 'someShitDocumets/'),
     ('secondPart', 'id', 'source', 'target', '');
-  insert into ancientGraphParts (graph, graphTable) values (1,1), (1,2);
+  insert into _ancientGraphParts (graph, graphTable) values (1,1), (1,2);
 `;
 
 insert_new_graph = `
-  insert into ancientGraphs (id, defaultGraphTable) values (1,1);
+  insert into _ancientGraphs (id, defaultGraphTable) values (1,1);
 `;
 
 create_view_construcor = `
-  CREATE OR REPLACE FUNCTION ancientViewConstrucor(gId integer) RETURNS setof record as $$
+  CREATE OR REPLACE FUNCTION _ancientViewConstrucor(gId integer) RETURNS setof record as $$
   	DECLARE
     	oneTable record;
       onePath record;
       gStructure record;
     BEGIN
-    	create TEMP table ancientPaths ("id" text, "graphPartTableId" text, "source" text, "target" text, "graphPartTableName" text);
+    	create TEMP table _ancientPaths ("id" text, "graphPartTableId" text, "source" text, "target" text, "graphPartTableName" text);
       for oneTable in 
-      	select * from ancientGraphParts as gParts, ancientGraphTables as gTable where 
+      	select * from _ancientGraphParts as gParts, _ancientGraphTables as gTable where 
     			gParts.graph = gId and
       		gTable.id = gParts.graphTable
       LOOP
-      	execute('insert into ancientPaths select lId.id as "id", currentTable.'
+      	execute('insert into _ancientPaths select lId.id as "id", currentTable.'
       	||oneTable.idField||' as "graphPartTableId", '''
       	||oneTable.sourceFieldTable||'''||cast (currentTable."'||oneTable.sourceField||'" as text), '''
       	||oneTable.targetFieldTable||'''||cast (currentTable."'||oneTable.targetField||E'" as text), '''
-      	||oneTable.tableName||''' as "graphPartTableName" from '||oneTable.tableName||' as currentTable, ancientLinksId as lId
+      	||oneTable.tableName||''' as "graphPartTableName" from '||oneTable.tableName||' as currentTable, _ancientLinksId as lId
       	where currentTable.'||oneTable.idField||' = lId.realId
       	and lId.graphTableId = '||oneTable.graphTable);
       end loop;
       for onePath in 
-    		select * from ancientPaths
+    		select * from _ancientPaths
           LOOP 
           	return next onePath;
           end loop;
-      drop table ancientPaths;
+      drop table _ancientPaths;
       return;
     END;
   $$ LANGUAGE plpgsql;
@@ -108,10 +108,10 @@ create_view_construcor = `
 
 
 create_graphtables_trigers = `
-  CREATE OR REPLACE FUNCTION ancientGraphTablesInsering() RETURNS TRIGGER AS $$
+  CREATE OR REPLACE FUNCTION _ancientGraphTablesInsering() RETURNS TRIGGER AS $$
     BEGIN
       EXECUTE (' 
-        insert into ancientLinksId(realId, graphTableId) 
+        insert into _ancientLinksId(realId, graphTableId) 
           select "'||cast(NEW.idField as text)||'" as realId, '||cast(NEW.id as text)||' as graphTableId from '||cast(NEW.tableName as text)||';
       ');
       return NEW;
@@ -119,38 +119,38 @@ create_graphtables_trigers = `
   $$ LANGUAGE plpgsql;
   
   CREATE TRIGGER graphtables_inputaudit
-  AFTER INSERT ON ancientGraphTables
-    FOR EACH ROW EXECUTE PROCEDURE ancientGraphTablesInsering(); 
+  AFTER INSERT ON _ancientGraphTables
+    FOR EACH ROW EXECUTE PROCEDURE _ancientGraphTablesInsering(); 
   
-  CREATE OR REPLACE FUNCTION ancientGraphTablesDeleting() RETURNS TRIGGER AS $$
+  CREATE OR REPLACE FUNCTION _ancientGraphTablesDeleting() RETURNS TRIGGER AS $$
     BEGIN
-        DELETE from ancientLinksId where graphTableId = old.id;
+        DELETE from _ancientLinksId where graphTableId = old.id;
         RETURN old;
     END;
   $$ LANGUAGE plpgsql;
       
   CREATE TRIGGER graphtables_deleteaudit
-  AFTER delete ON ancientGraphTables
-    FOR EACH ROW EXECUTE PROCEDURE ancientGraphTablesDeleting(); 
+  AFTER delete ON _ancientGraphTables
+    FOR EACH ROW EXECUTE PROCEDURE _ancientGraphTablesDeleting(); 
 `;
 
 create_graph_triger = `
   CREATE OR REPLACE FUNCTION createGraphView() RETURNS TRIGGER AS $$
     BEGIN
       EXECUTE (E'
-        CREATE or REPLACE VIEW ancientViewGraph'||cast(NEW.id as text)||' AS 
-        	SELECT * FROM ancientViewConstrucor ('||cast(NEW.id as text)||') as 
+        CREATE or REPLACE VIEW _ancientViewGraph'||cast(NEW.id as text)||' AS 
+        	SELECT * FROM _ancientViewConstrucor ('||cast(NEW.id as text)||') as 
           	f("id" text, "graphPartTableId" text, "source" text, "target" text, "graphPartTableName" text);
         CREATE TRIGGER graph_audit
-        INSTEAD OF INSERT ON ancientViewGraph'||cast(NEW.id as text)||'
-          FOR EACH ROW EXECUTE PROCEDURE ancientGraphInsering();
+        INSTEAD OF INSERT ON _ancientViewGraph'||cast(NEW.id as text)||'
+          FOR EACH ROW EXECUTE PROCEDURE _ancientGraphInsering();
       ');
 		RETURN NEW;
     END;
   $$ LANGUAGE plpgsql;
 
   CREATE TRIGGER graph_audit
-  AFTER INSERT ON ancientGraphs
+  AFTER INSERT ON _ancientGraphs
     FOR EACH ROW EXECUTE PROCEDURE createGraphView();
 `;
 
@@ -158,14 +158,14 @@ drop_all = `
   drop table IF EXISTS firstPart;
   drop table IF EXISTS secondPart;
   drop table IF EXISTS someShitDocumets;
-  drop table IF EXISTS ancientGraphs;
-  drop table IF EXISTS ancientGraphParts;
-  drop table IF EXISTS ancientGraphTables;
-  drop table IF EXISTS ancientLinksId;
-  drop view IF EXISTS ancientViewGraph1;
+  drop table IF EXISTS _ancientGraphs;
+  drop table IF EXISTS _ancientGraphParts;
+  drop table IF EXISTS _ancientGraphTables;
+  drop table IF EXISTS _ancientLinksId;
+  drop view IF EXISTS _ancientViewGraph1;
 `;
 check = `
-select * from ancientViewGraph1;
+select * from _ancientViewGraph1;
 `;
 
 client.connect()

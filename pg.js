@@ -78,29 +78,20 @@ create_view_construcor = `
   CREATE OR REPLACE FUNCTION _ancientViewConstrucor(gId integer) RETURNS setof record as $$
   	DECLARE
     	oneTable record;
-      onePath record;
-      gStructure record;
     BEGIN
-    	create TEMP table _ancientPaths ("id" text, "graphPartTableId" text, "source" text, "target" text, "graphPartTableName" text);
-      for oneTable in 
+    	for oneTable in 
       	select * from _ancientGraphParts as gParts, _ancientGraphTables as gTable where 
     			gParts.graph = gId and
       		gTable.id = gParts.graphTable
       LOOP
-      	execute('insert into _ancientPaths select lId.id as "id", currentTable.'
+      	RETURN QUERY EXECUTE 'select lId.id as "id", currentTable.'
       	||oneTable.idField||' as "graphPartTableId", '''
       	||oneTable.sourceFieldTable||'''||cast (currentTable."'||oneTable.sourceField||'" as text), '''
-      	||oneTable.targetFieldTable||'''||cast (currentTable."'||oneTable.targetField||E'" as text), '''
+      	||oneTable.targetFieldTable||'''||cast (currentTable."'||oneTable.targetField||E'" as text), text '''
       	||oneTable.tableName||''' as "graphPartTableName" from '||oneTable.tableName||' as currentTable, _ancientLinksId as lId
       	where currentTable.'||oneTable.idField||' = lId.realId
-      	and lId.graphTableId = '||oneTable.graphTable);
+      	and lId.graphTableId = '||oneTable.graphTable;
       end loop;
-      for onePath in 
-    		select * from _ancientPaths
-          LOOP 
-          	return next onePath;
-          end loop;
-      drop table _ancientPaths;
       return;
     END;
   $$ LANGUAGE plpgsql;
@@ -140,10 +131,7 @@ create_graph_triger = `
       EXECUTE (E'
         CREATE or REPLACE VIEW _ancientViewGraph'||cast(NEW.id as text)||' AS 
         	SELECT * FROM _ancientViewConstrucor ('||cast(NEW.id as text)||') as 
-          	f("id" text, "graphPartTableId" text, "source" text, "target" text, "graphPartTableName" text);
-        CREATE TRIGGER graph_audit
-        INSTEAD OF INSERT ON _ancientViewGraph'||cast(NEW.id as text)||'
-          FOR EACH ROW EXECUTE PROCEDURE _ancientGraphInsering();
+          	f("id" integer, "graphPartTableId" integer, "source" text, "target" text, "graphPartTableName" text);
       ');
 		RETURN NEW;
     END;

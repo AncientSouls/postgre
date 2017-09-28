@@ -57,6 +57,10 @@ create_tables = `
   create table someShitDocumets (
     id serial
   );
+  create table someShitRights (
+    username text,
+    linkId integer
+  );
 `;
 
 insert_data = `
@@ -73,30 +77,6 @@ insert_data = `
 insert_new_graph = `
   insert into _ancientGraphs (id, defaultGraphTable) values (1,1);
 `;
-
-create_view_construcor = `
-  CREATE OR REPLACE FUNCTION _ancientViewConstrucor(gId integer) RETURNS setof record as $$
-  	DECLARE
-    	oneTable record;
-    BEGIN
-    	for oneTable in 
-      	select * from _ancientGraphParts as gParts, _ancientGraphTables as gTable where 
-    			gParts.graph = gId and
-      		gTable.id = gParts.graphTable
-      LOOP
-      	RETURN QUERY EXECUTE 'select lId.id as "id", currentTable.'
-      	||oneTable.idField||' as "graphPartTableId", '''
-      	||oneTable.sourceFieldTable||'''||cast (currentTable."'||oneTable.sourceField||'" as text), '''
-      	||oneTable.targetFieldTable||'''||cast (currentTable."'||oneTable.targetField||E'" as text), text '''
-      	||oneTable.tableName||''' as "graphPartTableName" from '||oneTable.tableName||' as currentTable, _ancientLinksId as lId
-      	where currentTable.'||oneTable.idField||' = lId.realId
-      	and lId.graphTableId = '||oneTable.graphTable;
-      end loop;
-      return;
-    END;
-  $$ LANGUAGE plpgsql;
-`;
-
 
 create_graphtables_trigers = `
   CREATE OR REPLACE FUNCTION _ancientGraphTablesInsering() RETURNS TRIGGER AS $$
@@ -127,30 +107,49 @@ create_graphtables_trigers = `
 
 create_graph_triger = `
   CREATE OR REPLACE FUNCTION createGraphView() RETURNS TRIGGER AS $$
+    DECLARE
+      oneTable record;
+      viewString text := '';
+      FirstTime boolean := true;
     BEGIN
-      EXECUTE (E'
-        CREATE or REPLACE VIEW _ancientViewGraph'||cast(NEW.id as text)||' AS 
-        	SELECT * FROM _ancientViewConstrucor ('||cast(NEW.id as text)||') as 
-          	f("id" integer, "graphPartTableId" integer, "source" text, "target" text, "graphPartTableName" text);
-      ');
+    for oneTable in 
+      select * from _ancientGraphParts as gParts, _ancientGraphTables as gTable where 
+    		gParts.graph = NEW.graph and
+      	gTable.id = gParts.graphTable
+    LOOP
+      viewString := viewString||' union all ';
+      if FirstTime THEN
+        viewString := '';
+        FirstTime := false;
+      END IF; 
+      viewString := viewString||' select lId.id as "id", currentTable.'
+      	||oneTable.idField||' as "graphPartTableId", '''
+      	||oneTable.sourceFieldTable||'''||cast (currentTable."'||oneTable.sourceField||'" as text) as "source", '''
+      	||oneTable.targetFieldTable||'''||cast (currentTable."'||oneTable.targetField||E'" as text) as "target", text '''
+      	||oneTable.tableName||''' as "graphPartTableName" from '||oneTable.tableName||' as currentTable, _ancientLinksId as lId
+      	where currentTable.'||oneTable.idField||' = lId.realId
+      	and lId.graphTableId = '||oneTable.graphTable;
+    END LOOP;
+    EXECUTE ('CREATE or REPLACE VIEW _ancientViewGraph'||cast(NEW.id as text)||' AS '||viewString);
 		RETURN NEW;
     END;
   $$ LANGUAGE plpgsql;
 
   CREATE TRIGGER graph_audit
-  AFTER INSERT ON _ancientGraphs
+  AFTER INSERT ON _ancientGraphParts
     FOR EACH ROW EXECUTE PROCEDURE createGraphView();
 `;
 
 drop_all = `
+  drop view IF EXISTS _ancientViewGraph1;
   drop table IF EXISTS firstPart;
   drop table IF EXISTS secondPart;
   drop table IF EXISTS someShitDocumets;
+  drop table IF EXISTS someShitRights;
   drop table IF EXISTS _ancientGraphs;
   drop table IF EXISTS _ancientGraphParts;
   drop table IF EXISTS _ancientGraphTables;
   drop table IF EXISTS _ancientLinksId;
-  drop view IF EXISTS _ancientViewGraph1;
 `;
 check = `
 select * from _ancientViewGraph1;
@@ -161,7 +160,6 @@ client.connect()
 async.series([
   (next) => client.query(drop_all, next),
   (next) => client.query(create_tables, next),
-  (next) => client.query(create_view_construcor, next),
   (next) => client.query(create_graphtables_trigers, next),
   (next) => client.query(create_graph_triger, next),
   (next) => client.query(insert_data, next),
@@ -170,5 +168,5 @@ async.series([
   (next) => client.query(drop_all, next),
 ], (error, results) => {
     console.error(error);
-    console.log(results[7]);
+    console.log(results[6]);
 });

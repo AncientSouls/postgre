@@ -16,6 +16,7 @@ var
   create_view_construcor,
   create_graphtables_triger,
   create_graph_triger,
+  create_graphpart_triger,
   drop_all
 ;
 
@@ -27,13 +28,14 @@ create_tables = `
   create table _ancientLinksId (
     id serial,
     graphTableId integer,
-    realId integer
+    realId integer,
+    primary key (graphTableId, realId)
   );
   create table _ancientGraphParts (
     id serial,
     graphTable integer,
-    localId integer,
-    graph integer
+    graph integer,
+    primary key (graph, graphTable)
   );
   create table _ancientGraphTables (
     id serial,
@@ -42,7 +44,8 @@ create_tables = `
     sourceField text, 
     sourceFieldTable text DEFAULT '',
     targetField text,
-    targetFieldTable text DEFAULT ''
+    targetFieldTable text DEFAULT '',
+    primary key (idField, sourceField, targetField, tableName)
   );
   create table firstPart (
     "number" serial,
@@ -96,6 +99,7 @@ create_graphtables_trigers = `
   CREATE OR REPLACE FUNCTION _ancientGraphTablesDeleting() RETURNS TRIGGER AS $$
     BEGIN
         DELETE from _ancientLinksId where graphTableId = old.id;
+        DELETE from _ancientGraphParts where graphTable = old.id;
         RETURN old;
     END;
   $$ LANGUAGE plpgsql;
@@ -103,45 +107,92 @@ create_graphtables_trigers = `
   CREATE TRIGGER graphtables_deleteaudit
   AFTER delete ON _ancientGraphTables
     FOR EACH ROW EXECUTE PROCEDURE _ancientGraphTablesDeleting(); 
+    
+  CREATE OR REPLACE FUNCTION _ancientGraphTablesUpdating() RETURNS TRIGGER AS $$
+   DECLARE
+      onePart record;
+    BEGIN
+      for onePart in 
+        select graph from _ancientGraphParts where graphTable = OLD.id
+      LOOP
+        PERFORM _ancient_create_view(onePart.graph);
+      END LOOP;
+      RETURN old;
+    END;
+  $$ LANGUAGE plpgsql;
+  
+  CREATE TRIGGER graphtables_updateaudit
+  AFTER delete ON _ancientGraphTables
+    FOR EACH ROW EXECUTE PROCEDURE _ancientGraphTablesUpdating(); 
+    
+`;
+
+create_graphpart_triger = `
+  CREATE OR REPLACE FUNCTION createGraphView() RETURNS TRIGGER AS $$
+    DECLARE
+      graphId integer;
+    BEGIN
+      IF (TG_OP = 'DELETE') THEN
+        graphId := OLD.graph;
+      ELSE
+        graphId := NEW.graph;
+      END IF;
+      PERFORM _ancient_create_view(graphId);
+  		RETURN NEW;
+    END;
+  $$ LANGUAGE plpgsql;
+
+  CREATE TRIGGER graph_audit
+  AFTER INSERT OR DELETE ON _ancientGraphParts
+    FOR EACH ROW EXECUTE PROCEDURE createGraphView();
 `;
 
 create_graph_triger = `
-  CREATE OR REPLACE FUNCTION createGraphView() RETURNS TRIGGER AS $$
+  CREATE OR REPLACE FUNCTION _ancientGraphDeleting() RETURNS TRIGGER AS $$
+    BEGIN
+      EXECUTE ('DROP VIEW _ancientViewGraph'||cast(old.id as text)||';');
+        RETURN old;
+    END;
+  $$ LANGUAGE plpgsql;
+      
+  CREATE TRIGGER graph_deleting_audit
+  AFTER delete ON _ancientGraphs
+    FOR EACH ROW EXECUTE PROCEDURE _ancientGraphDeleting();
+`;
+
+create_view_construcor = `
+  CREATE OR REPLACE FUNCTION _ancient_create_view(graphId integer) RETURNS void AS $$
     DECLARE
       oneTable record;
       viewString text := '';
       FirstTime boolean := true;
     BEGIN
-    for oneTable in 
-      select * from _ancientGraphParts as gParts, _ancientGraphTables as gTable where 
-    		gParts.graph = NEW.graph and
-      	gTable.id = gParts.graphTable
-    LOOP
-      viewString := viewString||' union all ';
-      if FirstTime THEN
-        viewString := '';
-        FirstTime := false;
-      END IF; 
-      viewString := viewString||' select lId.id as "id", currentTable.'
-      	||oneTable.idField||' as "graphPartTableId", '''
-      	||oneTable.sourceFieldTable||'''||cast (currentTable."'||oneTable.sourceField||'" as text) as "source", '''
-      	||oneTable.targetFieldTable||'''||cast (currentTable."'||oneTable.targetField||E'" as text) as "target", text '''
-      	||oneTable.tableName||''' as "graphPartTableName" from '||oneTable.tableName||' as currentTable, _ancientLinksId as lId
-      	where currentTable.'||oneTable.idField||' = lId.realId
-      	and lId.graphTableId = '||oneTable.graphTable;
-    END LOOP;
-    EXECUTE ('CREATE or REPLACE VIEW _ancientViewGraph'||cast(NEW.id as text)||' AS '||viewString);
-		RETURN NEW;
+      for oneTable in 
+        select * from _ancientGraphParts as gParts, _ancientGraphTables as gTable where 
+      		gParts.graph = graphId and
+        	gTable.id = gParts.graphTable
+      LOOP
+        viewString := viewString||' union all ';
+        if FirstTime THEN
+          viewString := '';
+          FirstTime := false;
+        END IF; 
+        viewString := viewString||' select lId.id as "id", currentTable.'
+        	||oneTable.idField||' as "graphPartTableId", '''
+        	||oneTable.sourceFieldTable||'''||cast (currentTable."'||oneTable.sourceField||'" as text) as "source", '''
+        	||oneTable.targetFieldTable||'''||cast (currentTable."'||oneTable.targetField||E'" as text) as "target", text '''
+        	||oneTable.tableName||''' as "graphPartTableName" from '||oneTable.tableName||' as currentTable, _ancientLinksId as lId
+        	where currentTable.'||oneTable.idField||' = lId.realId
+        	and lId.graphTableId = '||oneTable.graphTable;
+      END LOOP;
+      EXECUTE ('CREATE OR REPLACE VIEW _ancientViewGraph'||graphId||' as '|| viewString ||';');
     END;
-  $$ LANGUAGE plpgsql;
-
-  CREATE TRIGGER graph_audit
-  AFTER INSERT ON _ancientGraphParts
-    FOR EACH ROW EXECUTE PROCEDURE createGraphView();
+$$ LANGUAGE plpgsql;
 `;
 
 drop_all = `
   drop view IF EXISTS _ancientViewGraph1;
+  drop view IF EXISTS _ancientViewGraph2;
   drop table IF EXISTS firstPart;
   drop table IF EXISTS secondPart;
   drop table IF EXISTS someShitDocumets;
@@ -160,13 +211,14 @@ client.connect()
 async.series([
   (next) => client.query(drop_all, next),
   (next) => client.query(create_tables, next),
+  (next) => client.query(create_view_construcor, next),
   (next) => client.query(create_graphtables_trigers, next),
-  (next) => client.query(create_graph_triger, next),
+  (next) => client.query(create_graphpart_triger, next),
   (next) => client.query(insert_data, next),
   (next) => client.query(insert_new_graph, next),
   (next) => client.query(check, next),
   (next) => client.query(drop_all, next),
 ], (error, results) => {
     console.error(error);
-    console.log(results[6]);
+    console.log(results[7]);
 });

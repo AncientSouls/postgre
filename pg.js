@@ -12,7 +12,6 @@ var client = new Client({
 var 
   create_tables, 
   insert_data,
-  insert_new_graph,
   create_view_construcor,
   create_graphtables_triger,
   create_graph_triger,
@@ -21,24 +20,8 @@ var
 ;
 
 create_tables = `
-  create table _ancientGraphs (
-    id serial,
-    defaultGraphTable text
-  );
-  create table _ancientLinksId (
-    id serial,
-    graphTableId integer,
-    realId integer,
-    primary key (graphTableId, realId)
-  );
-  create table _ancientGraphParts (
-    id serial,
-    graphTable integer,
-    graph integer,
-    primary key (graph, graphTable)
-  );
   create table _ancientGraphTables (
-    id serial,
+    id serial UNIQUE,
     tableName text,
     idField text,
     sourceField text, 
@@ -47,6 +30,23 @@ create_tables = `
     targetFieldTable text DEFAULT '',
     primary key (idField, sourceField, targetField, tableName)
   );
+  create table _ancientGraphs (
+    id serial UNIQUE,
+    defaultGraphTable integer references _ancientGraphTables(id) ON DELETE SET NULL
+  );
+  create table _ancientGraphParts (
+    id serial UNIQUE,
+    graphTableId integer references _ancientGraphTables(id) ON DELETE CASCADE,
+    graph integer references _ancientGraphs(id) ON DELETE CASCADE,
+    primary key (graph, graphTableId)
+  );
+  create table _ancientLinksId (
+    id serial UNIQUE,
+    graphTableId integer references _ancientGraphTables(id) ON DELETE CASCADE,
+    realId integer, 
+    primary key (graphTableId, realId)
+  );
+
   create table firstPart (
     "number" serial,
   	"from" text,
@@ -74,12 +74,10 @@ insert_data = `
   insert into _ancientGraphTables (tableName, idField, sourceField, targetField, targetFieldTable) values 
     ('firstPart', 'number', 'from', 'to', 'someShitDocumets/'),
     ('secondPart', 'id', 'source', 'target', '');
-  insert into _ancientGraphParts (graph, graphTable) values (1,1), (1,2);
+  insert into _ancientGraphs (id, defaultGraphTable) values (1,1);
+  insert into _ancientGraphParts (graph, graphTableId) values (1,1), (1,2);
 `;
 
-insert_new_graph = `
-  insert into _ancientGraphs (id, defaultGraphTable) values (1,1);
-`;
 
 create_graphtables_trigers = `
   CREATE OR REPLACE FUNCTION _ancientGraphTablesInsering() RETURNS TRIGGER AS $$
@@ -95,25 +93,13 @@ create_graphtables_trigers = `
   CREATE TRIGGER graphtables_inputaudit
   AFTER INSERT ON _ancientGraphTables
     FOR EACH ROW EXECUTE PROCEDURE _ancientGraphTablesInsering(); 
-  
-  CREATE OR REPLACE FUNCTION _ancientGraphTablesDeleting() RETURNS TRIGGER AS $$
-    BEGIN
-        DELETE from _ancientLinksId where graphTableId = old.id;
-        DELETE from _ancientGraphParts where graphTable = old.id;
-        RETURN old;
-    END;
-  $$ LANGUAGE plpgsql;
-      
-  CREATE TRIGGER graphtables_deleteaudit
-  AFTER delete ON _ancientGraphTables
-    FOR EACH ROW EXECUTE PROCEDURE _ancientGraphTablesDeleting(); 
     
   CREATE OR REPLACE FUNCTION _ancientGraphTablesUpdating() RETURNS TRIGGER AS $$
    DECLARE
       onePart record;
     BEGIN
       for onePart in 
-        select graph from _ancientGraphParts where graphTable = OLD.id
+        select graph from _ancientGraphParts where graphTableId = OLD.id
       LOOP
         PERFORM _ancient_create_view(onePart.graph);
       END LOOP;
@@ -124,7 +110,6 @@ create_graphtables_trigers = `
   CREATE TRIGGER graphtables_updateaudit
   AFTER delete ON _ancientGraphTables
     FOR EACH ROW EXECUTE PROCEDURE _ancientGraphTablesUpdating(); 
-    
 `;
 
 create_graphpart_triger = `
@@ -170,7 +155,7 @@ create_view_construcor = `
       for oneTable in 
         select * from _ancientGraphParts as gParts, _ancientGraphTables as gTable where 
       		gParts.graph = graphId and
-        	gTable.id = gParts.graphTable
+        	gTable.id = gParts.graphTableId
       LOOP
         viewString := viewString||' union all ';
         if FirstTime THEN
@@ -183,7 +168,7 @@ create_view_construcor = `
         	||oneTable.targetFieldTable||'''||cast (currentTable."'||oneTable.targetField||E'" as text) as "target", text '''
         	||oneTable.tableName||''' as "graphPartTableName" from '||oneTable.tableName||' as currentTable, _ancientLinksId as lId
         	where currentTable.'||oneTable.idField||' = lId.realId
-        	and lId.graphTableId = '||oneTable.graphTable;
+        	and lId.graphTableId = '||oneTable.graphTableId;
       END LOOP;
       EXECUTE ('CREATE OR REPLACE VIEW _ancientViewGraph'||graphId||' as '|| viewString ||';');
     END;
@@ -197,10 +182,10 @@ drop_all = `
   drop table IF EXISTS secondPart;
   drop table IF EXISTS someShitDocumets;
   drop table IF EXISTS someShitRights;
-  drop table IF EXISTS _ancientGraphs;
   drop table IF EXISTS _ancientGraphParts;
-  drop table IF EXISTS _ancientGraphTables;
+  drop table IF EXISTS _ancientGraphs;
   drop table IF EXISTS _ancientLinksId;
+  drop table IF EXISTS _ancientGraphTables;
 `;
 check = `
 select * from _ancientViewGraph1;
@@ -215,10 +200,9 @@ async.series([
   (next) => client.query(create_graphtables_trigers, next),
   (next) => client.query(create_graphpart_triger, next),
   (next) => client.query(insert_data, next),
-  (next) => client.query(insert_new_graph, next),
   (next) => client.query(check, next),
   (next) => client.query(drop_all, next),
 ], (error, results) => {
     console.error(error);
-    console.log(results[7]);
+    console.log(results[6]);
 });

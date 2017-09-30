@@ -37,8 +37,8 @@ create_tables = `
   create table _ancientGraphParts (
     id serial UNIQUE,
     graphTableId integer references _ancientGraphTables(id) ON DELETE CASCADE,
-    graph integer references _ancientGraphs(id) ON DELETE CASCADE,
-    primary key (graph, graphTableId)
+    graphId integer references _ancientGraphs(id) ON DELETE CASCADE,
+    primary key (graphId, graphTableId)
   );
   create table _ancientLinksId (
     id serial UNIQUE,
@@ -68,6 +68,7 @@ create_tables = `
 
 insert_data = `
   insert into someShitDocumets (id) values (1),(2),(3);
+  insert into someShitRights (username,linkId) values ('ubuntu', 2);
   insert into firstPart ("from", "to") values ('someShitDocumets/1',3);
   insert into secondPart ("source", "target") values ('someShitDocumets/2','someShitDocumets/3');
   insert into secondPart ("source", "target") values ('someShitDocumets/3','someShitDocumets/3');
@@ -75,7 +76,7 @@ insert_data = `
     ('firstPart', 'number', 'from', 'to', 'someShitDocumets/'),
     ('secondPart', 'id', 'source', 'target', '');
   insert into _ancientGraphs (id, defaultGraphTable) values (1,1);
-  insert into _ancientGraphParts (graph, graphTableId) values (1,1), (1,2);
+  insert into _ancientGraphParts (graphId, graphTableId) values (1,1), (1,2);
 `;
 
 
@@ -84,7 +85,7 @@ create_graphtables_trigers = `
     BEGIN
       EXECUTE (' 
         insert into _ancientLinksId(realId, graphTableId) 
-          select "'||cast(NEW.idField as text)||'" as realId, '||cast(NEW.id as text)||' as graphTableId from '||cast(NEW.tableName as text)||';
+          select "'||NEW.idField||'" as realId, '||NEW.id::text||' as graphTableId from '||NEW.tableName||';
       ');
       return NEW;
     END;
@@ -99,9 +100,9 @@ create_graphtables_trigers = `
       onePart record;
     BEGIN
       for onePart in 
-        select graph from _ancientGraphParts where graphTableId = OLD.id
+        select graphId from _ancientGraphParts where graphTableId = OLD.id
       LOOP
-        PERFORM _ancient_create_view(onePart.graph);
+        PERFORM _ancient_create_view(onePart.graphId);
       END LOOP;
       RETURN old;
     END;
@@ -118,9 +119,9 @@ create_graphpart_triger = `
       graphId integer;
     BEGIN
       IF (TG_OP = 'DELETE') THEN
-        graphId := OLD.graph;
+        graphId := OLD.graphId;
       ELSE
-        graphId := NEW.graph;
+        graphId := NEW.graphId;
       END IF;
       PERFORM _ancient_create_view(graphId);
   		RETURN NEW;
@@ -146,15 +147,20 @@ create_graph_triger = `
 `;
 
 create_view_construcor = `
-  CREATE OR REPLACE FUNCTION _ancient_create_view(graphId integer) RETURNS void AS $$
+  CREATE OR REPLACE FUNCTION _ancientGraphViewInserting() RETURNS TRIGGER AS $$
+    BEGIN
+    
+    END;
+  $$ LANGUAGE plpgsql;
+  CREATE OR REPLACE FUNCTION _ancient_create_view(graph integer) RETURNS void AS $$
     DECLARE
       oneTable record;
       viewString text := '';
       FirstTime boolean := true;
     BEGIN
       for oneTable in 
-        select * from _ancientGraphParts as gParts, _ancientGraphTables as gTable where 
-      		gParts.graph = graphId and
+        select gTable.*,gParts.graphTableId from _ancientGraphParts as gParts, _ancientGraphTables as gTable where 
+      		gParts.graphId = graph and
         	gTable.id = gParts.graphTableId
       LOOP
         viewString := viewString||' union all ';
@@ -162,20 +168,31 @@ create_view_construcor = `
           viewString := '';
           FirstTime := false;
         END IF; 
-        viewString := viewString||' select lId.id as "id", currentTable.'
-        	||oneTable.idField||' as "graphPartTableId", '''
-        	||oneTable.sourceFieldTable||'''||cast (currentTable."'||oneTable.sourceField||'" as text) as "source", '''
-        	||oneTable.targetFieldTable||'''||cast (currentTable."'||oneTable.targetField||E'" as text) as "target", text '''
-        	||oneTable.tableName||''' as "graphPartTableName" from '||oneTable.tableName||' as currentTable, _ancientLinksId as lId
+        viewString := viewString||'select lId.id as "id", currentTable.'
+        	||oneTable.idField||' as "graphPartTableIdField", '''
+        	||oneTable.sourceFieldTable||'''|| currentTable."'||oneTable.sourceField||'" as "source", '''
+        	||oneTable.targetFieldTable||'''|| currentTable."'||oneTable.targetField||'" as "target", text '''
+        	||oneTable.id||''' as "graphTableId" from '||oneTable.tableName||' as currentTable, _ancientLinksId as lId, someShitRights as rights
         	where currentTable.'||oneTable.idField||' = lId.realId
-        	and lId.graphTableId = '||oneTable.graphTableId;
+        	and lId.graphTableId = '||oneTable.graphTableId||'
+        	and rights.username = current_user
+        	and lId.id = rights.linkId
+        	';
       END LOOP;
-      EXECUTE ('CREATE OR REPLACE VIEW _ancientViewGraph'||graphId||' as '|| viewString ||';');
+      EXECUTE ('
+        CREATE OR REPLACE VIEW _ancientViewGraph'||graph||' as '|| viewString ||';
+        
+        DROP TRIGGER IF EXISTS graphview_insertaudit ON _ancientviewgraph'||graph||';
+        CREATE TRIGGER graphview_insertaudit
+        instead of insert ON _ancientViewGraph'||graph||'
+          FOR EACH ROW EXECUTE PROCEDURE _ancientGraphViewInserting(); 
+      ');
     END;
 $$ LANGUAGE plpgsql;
 `;
 
 drop_all = `
+
   drop view IF EXISTS _ancientViewGraph1;
   drop view IF EXISTS _ancientViewGraph2;
   drop table IF EXISTS firstPart;
@@ -188,7 +205,7 @@ drop_all = `
   drop table IF EXISTS _ancientGraphTables;
 `;
 check = `
-select * from _ancientViewGraph1;
+ select * from _ancientViewGraph1;
 `;
 
 client.connect()
